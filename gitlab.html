@@ -38,6 +38,7 @@ body {
 <div class="topnav">
   <a class="" href="index.html">GitHub to CodeCommit </a>
   <a   class = "active"  href="gitlab.html">GitLab to CodeCommit </a>
+<a   class = ""  href="bitbucket.html">BitBucket to CodeCommit </a>
 </div>
 
 <br>
@@ -45,6 +46,11 @@ body {
 <label>
     Enter GitLab  token:
     <input id="token" />
+</label>
+<br>
+<label>
+    Enter Phone:
+    <input id="phone" />
 </label>
 <br>
 <br>
@@ -55,9 +61,9 @@ body {
 <script>
 var button = document.getElementById('test');
 var token = document.getElementById('token');
-
+var phone = document.getElementById('phone');
 function migrateALL(){
-    var res = "https://r44arcznjh.execute-api.us-east-2.amazonaws.com/gitlabmigrate?token="+token.value
+    var res = "https://r44arcznjh.execute-api.us-east-2.amazonaws.com/gitlabmigrate?token="+token.value+"&phone="+phone.value;
 
     window.open(res,"_blank")
 }
