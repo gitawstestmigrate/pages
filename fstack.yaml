@@ -1,0 +1,1189 @@
+# Fully Complete Stack
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Full Git to AWS Migration Stack w/ No EC2 Instance"
+
+Resources:
+  SyncApi:
+    Type: "AWS::ApiGateway::RestApi"
+    Properties:
+      Name: Sync
+
+  SyncApiMethod:
+    Type: "AWS::ApiGateway::Method"
+    Properties:
+      AuthorizationType: "NONE"
+      HttpMethod: "GET"
+      Integration:
+        IntegrationHttpMethod: "POST"
+        Type: "AWS_PROXY"
+        Uri: !Sub
+          - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${lambdaArn}/invocations"
+          - lambdaArn: !GetAtt "SyncLambdaStack.Arn"
+      ResourceId: !GetAtt "SyncApi.RootResourceId"
+      RestApiId: !Ref "SyncApi"
+
+  SyncApiDeployment:
+    Type: "AWS::ApiGateway::Deployment"
+    DependsOn: "SyncApiMethod"
+    Properties:
+      RestApiId: !Ref "SyncApi"
+      StageName: githubsync
+
+  #Sync lambda function template
+  SyncLambdaFullRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Action: ['sts:AssumeRole']
+          Effect: Allow
+          Principal:
+            Service: [lambda.amazonaws.com]
+        Version: '2012-10-17'
+      Path: /
+      Policies:
+        - PolicyName: SyncFullAcessLMDA
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Action:
+                - 'logs:*'
+                - 'ec2:CreateNetworkInterface'
+                - 'ec2:DescribeNetworkInterfaces'
+                - 'ec2:DeleteNetworkInterface'
+                - 'ec2:DescribeSubnets'
+                - 'ec2:DescribeSecurityGroups'
+                - 'ec2:DescribeDhcpOptions'
+                - 'ec2:DescribeVpcs'
+                - 'ec2:CreateNetworkInterfacePermission'
+                - 'codebuild:*'
+                - 'codecommit:GetBranch'
+                - 'codecommit:GetCommit'
+                - 'codecommit:GetRepository'
+                - 'codecommit:ListBranches'
+                - 'codecommit:ListRepositories'
+                - 'cloudwatch:GetMetricStatistics'
+                - 'events:DeleteRule'
+                - 'events:DescribeRule'
+                - 'events:DisableRule'
+                - 'events:EnableRule'
+                - 'events:ListTargetsByRule'
+                - 'events:ListRuleNamesByTarget'
+                - 'events:PutRule'
+                - 'events:PutTargets'
+                - 'events:RemoveTargets'
+                - 'logs:GetLogEvents'
+                - 's3:GetBucketLocation'
+                - 's3:ListAllMyBuckets'
+                - 's3:GetObject'
+                - 's3:GetObjectVersion'
+                Effect: Allow
+                Resource: '*'
+  SyncLambdaStack:
+      Type: AWS::Lambda::Function
+      Properties:
+        FunctionName: SyncLambdaStack
+        Role: !GetAtt SyncLambdaFullRole.Arn
+        Runtime: python3.7
+        Handler: index.my_handler
+        Timeout: 10
+        Layers: 
+        - arn:aws:lambda:us-east-2:986496399122:layer:v3:1
+        - arn:aws:lambda:us-east-2:986496399122:layer:github3:1
+        Code:
+          ZipFile: |
+            import json
+            import os
+            import github3
+            import requests
+            import boto3
+            import urllib
+
+            def lambda_handler(event, context):
+                # TODO implement
+                #username = 'gitawstestmigrate'
+                #access_token = "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"
+                repos_url = 'https://api.github.com/user/repos'
+                result = event["queryStringParameters"]
+                token = result['token']
+                access_token = token
+                user = result['user']
+                username = user
+                phone = result['phone']
+                ph_length = len(phone)
+                if len(phone)==10 or len(phone)==11 or len(phone)==12:
+                    if "+" in phone:
+                        phone_number = phone.replace('+','')
+                        if phone_number.isdigit() == False:
+                            return {
+                            'statusCode': 200,
+                            'body': json.dumps("Invalid Phone Number")
+                            } 
+                        else:
+                            phone_number = phone
+                    else:
+                        phone_number = phone
+                elif len(phone)==0 or len(phone)==1:
+                  phone_number = '6176062741'
+                else:
+                    return {
+                        'statusCode': 200,
+                        'body': json.dumps("Invalid Phone Number")
+                    }
+                gh_session = requests.Session()
+                gh_session.auth = (username,access_token)
+                privateLST = []
+                publicLST = []
+                prvLST = []
+                pblLST = []
+                totalRepos = []
+                flag = 0
+                repoCheck = 0
+                repos = json.loads(gh_session.get(repos_url).text)
+                gh = github3.login(token = access_token)
+                
+                try:
+                    #print("I AM HERE ")
+                    if repos['message'] == "Requires authentication":
+                        print("Invalid Credentials 1")
+                        flag = 1
+                except TypeError:
+                    print("CHECKING FOR USERNAMES")
+                    print()
+                    gh = github3.login(token = access_token)
+                    for repos in gh.repositories(type='private'):
+                        privateLST.append(repos)
+                    #print(privateLST)
+                    for repos in gh.repositories(type='public'):
+                        publicLST.append(repos)
+                    for i in publicLST:
+                        pblLST.append(str(i))
+                    for i in privateLST:
+                        prvLST.append(str(i))
+                    #print(prvLST)
+                    for items in pblLST:
+                        x = items.split("/")
+                        if x[0] in username:
+                            totalRepos.append(items)
+                    for items in prvLST:
+                        x = items.split("/")
+                        if x[0] in username:
+                            totalRepos.append(items)
+                    #print(totalRepos)
+                    if len(totalRepos) == 0:
+                        print("Invalid Credentials 2")
+                        flag = 1
+                    else:
+                        repoCheck = 1
+                
+                codecommit = boto3.client('codecommit')
+                repo_dic = codecommit.list_repositories()
+                repoLST = list(repo_dic['repositories'])
+                
+                if (flag == 0):    
+                    num = 0
+                    codecommit = boto3.client('codecommit')
+                    repo_dic = codecommit.list_repositories()
+                    repoLST = list(repo_dic['repositories'])
+                    repoCC = []
+                    counter = 0
+                    
+                    while counter < len(repoLST):
+                        repoCC.append(repoLST[counter]['repositoryName'])
+                        counter = counter + 1
+                
+                
+                def common_member(a, b):
+                    a_set = set(a)
+                    b_set = set(b)
+                    if (a_set & b_set):
+                        return True 
+                    else:
+                        return False
+                
+                rNames =[]
+                for n in totalRepos:
+                    n = items.split("/")
+                    rNames.append(n[1])
+
+
+                lstCHECK = common_member(repoCC,rNames)
+                
+                if(lstCHECK == True):
+                    cb = boto3.client( 'codebuild' )
+                    response = cb.start_build(projectName='Sync',
+                    environmentVariablesOverride=[
+                    {'name':'Token','value':access_token,'type':'PLAINTEXT'},
+                    {'name':'Username','value': username,'type':'PLAINTEXT'},
+                    {'name':'Phone','value': phone_number,'type':'PLAINTEXT'}])
+                    
+                    return{
+                        'statusCode': 200,
+                        'body': json.dumps("Sync starting to excute)
+                    }
+                    
+                else:
+                    return {
+                        'statusCode': 200,
+                        'body': json.dumps("Sync cannot execute without Repos being migrated into CodeCommit")
+                    }
+                
+  
+  SyncApiGatewayInvoke:
+    Type: "AWS::Lambda::Permission"
+    Properties:
+      Action: "lambda:InvokeFunction"
+      FunctionName: !GetAtt "SyncLambdaStack.Arn"
+      Principal: "apigateway.amazonaws.com"
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${SyncApi}/*/GET/"
+
+  
+  SyncLambdaLogGroup:
+    DependsOn: SyncLambdaStack
+    Type: "AWS::Logs::LogGroup"
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${SyncLambdaStack}"
+
+  CodeBuildProjectSync:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: CodeBuildProjectSync
+      ServiceRole: !GetAtt SyncGitHubRole.Arn
+      Artifacts:
+        Type: no_artifacts
+      Environment:
+        Type: LINUX_CONTAINER
+
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:3.0
+      Source:
+        Location: https://git-codecommit.us-east-2.amazonaws.com/v1/repos/githubsync-source 
+        Type: CODECOMMIT
+        
+
+      TimeoutInMinutes: 10
+  SyncGitHubRole:
+      Type: AWS::IAM::Role
+      Properties:
+        AssumeRolePolicyDocument:
+          Statement:
+          - Action: ['sts:AssumeRole']
+            Effect: Allow
+            Principal:
+              Service: [codebuild.amazonaws.com]
+          Version: '2012-10-17'
+        Path: /
+        ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSCodeBuildAdminAccess
+        - arn:aws:iam::aws:policy/AWSCodeCommitFullAccess
+        Policies:
+          - PolicyName: SyncGitHubAccess
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Action:
+                  - 'logs:*'
+                  - 'ec2:CreateNetworkInterface'
+                  - 'ec2:DescribeNetworkInterfaces'
+                  - 'ec2:DeleteNetworkInterface'
+                  - 'ec2:DescribeSubnets'
+                  - 'ec2:DescribeSecurityGroups'
+                  - 'ec2:DescribeDhcpOptions'
+                  - 'ec2:DescribeVpcs'
+                  - 'ec2:CreateNetworkInterfacePermission'
+                  - 'codebuild:*'
+                  - 'codecommit:GetBranch'
+                  - 'codecommit:GetCommit'
+                  - 'codecommit:GetRepository'
+                  - 'codecommit:ListBranches'
+                  - 'codecommit:ListRepositories'
+                  - 'cloudwatch:GetMetricStatistics'
+                  - 'events:DeleteRule'
+                  - 'events:DescribeRule'
+                  - 'events:DisableRule'
+                  - 'events:EnableRule'
+                  - 'events:ListTargetsByRule'
+                  - 'events:ListRuleNamesByTarget'
+                  - 'events:PutRule'
+                  - 'events:PutTargets'
+                  - 'events:RemoveTargets'
+                  - 'logs:GetLogEvents'
+                  - 's3:GetBucketLocation'
+                  - 's3:ListAllMyBuckets'
+                  - 's3:GetObject'
+                  - 's3:GetObjectVersion'
+                  Effect: Allow
+                  Resource: '*'
+##################################################################################################################
+##################################################################################################################
+##################################################################################################################
+##################################################################################################################
+##################################################################################################################
+##################################################################################################################
+##################################################################################################################
+##################################################################################################################
+  GitHubApi:
+    Type: "AWS::ApiGateway::RestApi"
+    Properties:
+      Name: GitHub
+
+  GitHubApiMethod:
+    Type: "AWS::ApiGateway::Method"
+    Properties:
+      AuthorizationType: "NONE"
+      HttpMethod: "GET"
+      Integration:
+        IntegrationHttpMethod: "POST"
+        Type: "AWS_PROXY"
+        Uri: !Sub
+          - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${lambdaArn}/invocations"
+          - lambdaArn: !GetAtt "GitHubLambdaStack.Arn"
+      ResourceId: !GetAtt "GitHubApi.RootResourceId"
+      RestApiId: !Ref "GitHubApi"
+
+  GitHubApiDeployment:
+    Type: "AWS::ApiGateway::Deployment"
+    DependsOn: "GitHubApiMethod"
+    Properties:
+      RestApiId: !Ref "GitHubApi"
+      StageName: githubmigrate
+
+
+  #GitHub lambda function template
+  GitHubLambdaFullRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Action: ['sts:AssumeRole']
+          Effect: Allow
+          Principal:
+            Service: [lambda.amazonaws.com]
+        Version: '2012-10-17'
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSCodeBuildAdminAccess
+        - arn:aws:iam::aws:policy/AWSCodeCommitFullAccess
+      Policies:
+        - PolicyName: GitHubFullAcessLMDA
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Action:
+                - 'logs:*'
+                - 'ec2:CreateNetworkInterface'
+                - 'ec2:DescribeNetworkInterfaces'
+                - 'ec2:DeleteNetworkInterface'
+                - 'ec2:DescribeSubnets'
+                - 'ec2:DescribeSecurityGroups'
+                - 'ec2:DescribeDhcpOptions'
+                - 'ec2:DescribeVpcs'
+                - 'ec2:CreateNetworkInterfacePermission'
+                - 'codebuild:*'
+                - 'codecommit:GetBranch'
+                - 'codecommit:GetCommit'
+                - 'codecommit:GetRepository'
+                - 'codecommit:ListBranches'
+                - 'codecommit:ListRepositories'
+                - 'cloudwatch:GetMetricStatistics'
+                - 'events:DeleteRule'
+                - 'events:DescribeRule'
+                - 'events:DisableRule'
+                - 'events:EnableRule'
+                - 'events:ListTargetsByRule'
+                - 'events:ListRuleNamesByTarget'
+                - 'events:PutRule'
+                - 'events:PutTargets'
+                - 'events:RemoveTargets'
+                - 'logs:GetLogEvents'
+                - 's3:GetBucketLocation'
+                - 's3:ListAllMyBuckets'
+                - 's3:GetObject'
+                - 's3:GetObjectVersion'
+                Effect: Allow
+                Resource: '*'
+  GitHubLambdaStack:
+      Type: AWS::Lambda::Function
+      Properties:
+        FunctionName: GitHubLambdaStack
+        Role: !GetAtt GitHubLambdaFullRole.Arn
+        Runtime: python3.7
+        Timeout: 10
+        Handler: index.my_handler
+        Layers: 
+        - arn:aws:lambda:us-east-2:986496399122:layer:v3:1
+        - arn:aws:lambda:us-east-2:986496399122:layer:github3:1
+        Code:
+          ZipFile: |
+            import json
+            import boto3
+            import urllib
+            from github import Github
+            import github3
+            import requests
+            import random
+
+            def my_handler(event, context):
+                # TODO implement
+                #username = 'gitawstestmigrate'
+                #access_token = "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"
+                repos_url = 'https://api.github.com/user/repos'
+                repoURL = "https://git-codecommit.us-east-2.amazonaws.com/v1/repos/"
+                result = event["queryStringParameters"]
+                token = result['token']
+                access_token = token
+                user = result['user']
+                username = user 
+                repo = result['repo']
+                #repo = 'testproj'
+                phone = result['phone']
+                ph_length = len(phone)
+                if len(phone)==10 or len(phone)==11 or len(phone)==12:
+                    if "+" in phone:
+                        phone_number = phone.replace('+','')
+                        if phone_number.isdigit() == False:
+                            return {
+                            'statusCode': 200,
+                            'body': json.dumps("Invalid Phone Number")
+                            } 
+                        else:
+                            phone_number = phone
+                    else:
+                        phone_number = phone
+                elif len(phone)==0 or len(phone)==1:
+                  phone_number = '6176062741'
+                else:
+                    return {
+                        'statusCode': 200,
+                        'body': json.dumps("Invalid Phone Number")
+                    }
+
+
+                gh_session = requests.Session()
+                gh_session.auth = (username,access_token)
+                privateLST = []
+                publicLST = []
+                prvLST = []
+                pblLST = []
+                totalRepos = []
+                flag = 0
+                repoCheck = 0
+                repos = json.loads(gh_session.get(repos_url).text)
+                gh = github3.login(token = access_token)
+
+
+                #print(repos['message'])
+                try:
+                    #print("I AM HERE ")
+                    if repos['message'] == "Requires authentication":
+                        print("Invalid Credentials 1")
+                        flag = 1
+                except TypeError:
+                    print("CHECKING FOR USERNAMES")
+                    print()
+                    gh = github3.login(token = access_token)
+                    for repos in gh.repositories(type='private'):
+                        privateLST.append(repos)
+                    #print(privateLST)
+                    for repos in gh.repositories(type='public'):
+                        publicLST.append(repos)
+                    for i in publicLST:
+                        pblLST.append(str(i))
+                    for i in privateLST:
+                        prvLST.append(str(i))
+                    #print(prvLST)
+                    for items in pblLST:
+                        x = items.split("/")
+                        if x[0] in username:
+                            totalRepos.append(items)
+                    for items in prvLST:
+                        x = items.split("/")
+                        if x[0] in username:
+                            totalRepos.append(items)
+                    #print(totalRepos)
+                    if len(totalRepos) == 0:
+                        print("Invalid Credentials 2")
+                        flag = 1
+                    else:
+                        repoCheck = 1
+                
+                print(totalRepos)
+                if (repoCheck == 1):
+                #i = 1
+                    rNames = []
+                    for items in totalRepos:
+                        x = items.split("/")
+                        rNames.append(x[1])
+                    print(rNames)
+                    
+                    if repo in rNames:
+                        flag = 0
+                    else:
+                        flag = 2
+                
+                if (flag == 0):    
+                    num = 0
+                    codecommit = boto3.client('codecommit')
+                    repo_dic = codecommit.list_repositories()
+                    repoLST = list(repo_dic['repositories'])
+                    repoCC = []
+                    counter = 0
+                    
+                    while counter < len(repoLST):
+                        repoCC.append(repoLST[counter]['repositoryName'])
+                        counter = counter + 1
+                    if repo not in repoCC:
+                        flag = 0
+                        tempRepo = repo
+                    else:
+                        i = 0
+                        tempRepo = repo + str(i)
+                        while tempRepo in repoCC:
+                            i = i+1
+                            tempRepo = repo + str(i)
+                        
+                
+                if(flag == 1):
+                    return {
+                        'statusCode': 200,
+                        'body': json.dumps("Invalid Credentials")
+                    }
+                elif (flag == 2):
+                    return {
+                        'statusCode': 200,
+                        'body': json.dumps("Invalid Repo Name")
+                    }
+                else:
+                    cb = boto3.client( 'codebuild' )
+                    response = cb.start_build(projectName='CodeBuildProjectGitHub',
+                    environmentVariablesOverride=[
+                    {'name':'Token','value':access_token,'type':'PLAINTEXT'},
+                    {'name':'Username','value': user,'type':'PLAINTEXT'},
+                    {'name':'Repo','value':repo,'type':'PLAINTEXT'},
+                    {'name':'Reponame','value':tempRepo,'type':'PLAINTEXT'},
+                    {'name':'Phone','value':phone_number,'type':'PLAINTEXT'}])
+                    return {
+                        'statusCode': 200,
+                        'body': json.dumps("Parameters Passed Code Build Starting, repo contents are stored in "+repoURL)
+                    }  
+                
+                
+                
+                
+                
+                #g=Github("ghp_Ojj04nTzmya6Enfl67gvy9Gld8bivx3bQ42")
+                #repositories = g.get_repos(visibility='private')
+                #result = event["queryStringParameters"]
+                #token = result['token']
+                #user = result['user']
+                #repo = result['repo']
+                
+                
+                
+              # reponame = result['reponame']
+                #print(reponame)
+                #cb = boto3.client( 'codebuild' )
+                
+                #response = cb.start_build(projectName='codebuildmigrate',
+                #environmentVariablesOverride=[
+                #{'name':'Token','value':token,'type':'PLAINTEXT'},
+                #{'name':'Username','value': user,'type':'PLAINTEXT'},
+                #{'name':'Repo','value':repo,'type':'PLAINTEXT'}])
+                
+                #{'name':'Reponame','value':reponame,'type':'PLAINTEXT'}
+              
+                #repoURL = "https://git-codecommit.us-east-2.amazonaws.com/v1/repos/"
+                #+str(repo)
+                
+
+  GitHubApiGatewayInvoke:
+    Type: "AWS::Lambda::Permission"
+    Properties:
+      Action: "lambda:InvokeFunction"
+      FunctionName: !GetAtt "GitHubLambdaStack.Arn"
+      Principal: "apigateway.amazonaws.com"
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${GitHubApi}/*/GET/"
+
+  
+  GitHubLambdaLogGroup:
+    DependsOn: GitHubLambdaStack
+    Type: "AWS::Logs::LogGroup"
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${GitHubLambdaStack}"
+
+  CodeBuildProjectGitHub:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: CodeBuildProjectGitHub
+      ServiceRole: !GetAtt CodeBuildRoleGitHub.Arn
+      Artifacts:
+        Type: no_artifacts
+      Environment:
+        Type: LINUX_CONTAINER
+
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:3.0
+      Source:
+        Location: https://git-codecommit.us-east-2.amazonaws.com/v1/repos/githubmigrate-source
+        Type: CODECOMMIT
+        
+
+      TimeoutInMinutes: 10
+  CodeBuildRoleGitHub:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Action: ['sts:AssumeRole']
+          Effect: Allow
+          Principal:
+            Service: [codebuild.amazonaws.com]
+        Version: '2012-10-17'
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSCodeBuildAdminAccess
+        - arn:aws:iam::aws:policy/AWSCodeCommitFullAccess
+      Policies:
+        - PolicyName: CodeBuildAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Action:
+                - 'logs:*'
+                - 'ec2:CreateNetworkInterface'
+                - 'ec2:DescribeNetworkInterfaces'
+                - 'ec2:DeleteNetworkInterface'
+                - 'ec2:DescribeSubnets'
+                - 'ec2:DescribeSecurityGroups'
+                - 'ec2:DescribeDhcpOptions'
+                - 'ec2:DescribeVpcs'
+                - 'ec2:CreateNetworkInterfacePermission'
+                - 'codebuild:*'
+                - 'codecommit:GetBranch'
+                - 'codecommit:GetCommit'
+                - 'codecommit:GetRepository'
+                - 'codecommit:ListBranches'
+                - 'codecommit:ListRepositories'
+                - 'cloudwatch:GetMetricStatistics'
+                - 'events:DeleteRule'
+                - 'events:DescribeRule'
+                - 'events:DisableRule'
+                - 'events:EnableRule'
+                - 'events:ListTargetsByRule'
+                - 'events:ListRuleNamesByTarget'
+                - 'events:PutRule'
+                - 'events:PutTargets'
+                - 'events:RemoveTargets'
+                - 'logs:GetLogEvents'
+                - 's3:GetBucketLocation'
+                - 's3:ListAllMyBuckets'
+                - 's3:GetObject'
+                - 's3:GetObjectVersion'
+                Effect: Allow
+                Resource: '*'
+
+
+##################################################################################################################
+##################################################################################################################
+##################################################################################################################
+##################################################################################################################
+##################################################################################################################
+##################################################################################################################
+##################################################################################################################
+##################################################################################################################
+
+  GitLabApi:
+      Type: "AWS::ApiGateway::RestApi"
+      Properties:
+        Name: GitLab
+
+  GitLabApiMethod:
+      Type: "AWS::ApiGateway::Method"
+      Properties:
+        AuthorizationType: "NONE"
+        HttpMethod: "GET"
+        Integration:
+          IntegrationHttpMethod: "POST"
+          Type: "AWS_PROXY"
+          Uri: !Sub
+            - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${lambdaArn}/invocations"
+            - lambdaArn: !GetAtt "GitLabLambdaStack.Arn"
+        ResourceId: !GetAtt "GitLabApi.RootResourceId"
+        RestApiId: !Ref "GitLabApi"
+
+  GitLabApiDeployment:
+      Type: "AWS::ApiGateway::Deployment"
+      DependsOn: "GitLabApiMethod"
+      Properties:
+        RestApiId: !Ref "GitLabApi"
+        StageName: gitlabmigrate
+
+    #GitLab lambda function template
+  GitLabLambdaFullRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Action: ['sts:AssumeRole']
+          Effect: Allow
+          Principal:
+            Service: [lambda.amazonaws.com]
+        Version: '2012-10-17'
+      Path: /
+      Policies:
+        - PolicyName: GitLabFullAcessLMDA
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Action:
+                - 'logs:*'
+                - 'ec2:CreateNetworkInterface'
+                - 'ec2:DescribeNetworkInterfaces'
+                - 'ec2:DeleteNetworkInterface'
+                - 'ec2:DescribeSubnets'
+                - 'ec2:DescribeSecurityGroups'
+                - 'ec2:DescribeDhcpOptions'
+                - 'ec2:DescribeVpcs'
+                - 'ec2:CreateNetworkInterfacePermission'
+                - 'codebuild:*'
+                - 'codecommit:GetBranch'
+                - 'codecommit:GetCommit'
+                - 'codecommit:GetRepository'
+                - 'codecommit:ListBranches'
+                - 'codecommit:ListRepositories'
+                - 'cloudwatch:GetMetricStatistics'
+                - 'events:DeleteRule'
+                - 'events:DescribeRule'
+                - 'events:DisableRule'
+                - 'events:EnableRule'
+                - 'events:ListTargetsByRule'
+                - 'events:ListRuleNamesByTarget'
+                - 'events:PutRule'
+                - 'events:PutTargets'
+                - 'events:RemoveTargets'
+                - 'logs:GetLogEvents'
+                - 's3:GetBucketLocation'
+                - 's3:ListAllMyBuckets'
+                - 's3:GetObject'
+                - 's3:GetObjectVersion'
+                Effect: Allow
+                Resource: '*'
+  GitLabLambdaStack:
+      Type: AWS::Lambda::Function
+      Properties:
+        FunctionName: GitLabLambdaStack
+        Role: !GetAtt GitLabLambdaFullRole.Arn
+        Runtime: python3.7
+        Handler: index.my_handler
+        Timeout: 10
+        Layers: 
+        - arn:aws:lambda:us-east-2:986496399122:layer:v3:1
+        - arn:aws:lambda:us-east-2:986496399122:layer:github3:1
+        - arn:aws:lambda:us-east-2:986496399122:layer:python-gitlab:1
+        Code:
+          ZipFile: |
+            import json
+            import boto3
+            import gitlab 
+            def my_handler(event, context):
+              #token ='bt-gRNByzsokzVKmxy4K'
+              #phone ='6176062741'
+              result = event["queryStringParameters"]
+              token = result['token']
+              access_token = token
+              #message = 'Hello Lambda World!'
+              phone = result['phone']
+              #ph_length = len(phone)
+              if len(phone)==10 or len(phone)==11 or len(phone)==12:
+                  if "+" in phone:
+                      phone_number = phone.replace('+','')
+                      if phone_number.isdigit() == False:
+                          return {
+                          'statusCode': 200,
+                          'body': json.dumps("Invalid Phone Number")
+                          } 
+                      else:
+                          phone_number = phone
+                  else:
+                      phone_number = phone
+              elif len(phone)==0 or len(phone)==1:
+                phone_number = '6176062741'
+              else:
+                  return {
+                      'statusCode': 200,
+                      'body': json.dumps("Invalid Phone Number")
+                  }
+              gl = gitlab.Gitlab('https://gitlab.com', private_token=access_token)
+              try:
+                  projects = gl.projects.list(owned=True)
+                  cb = boto3.client( 'codebuild' )
+                  response = cb.start_build(projectName='CodeBuildProjectGitLab',
+                  environmentVariablesOverride=[
+                  {'name':'Token','value':access_token,'type':'PLAINTEXT'},
+                  {'name':'Phone','value':phone_number,'type':'PLAINTEXT'}])
+                  return {
+                  'statusCode': 200,
+                  'body': json.dumps('Parameters passed GitLab migration starting')
+                  }
+              except gitlab.exceptions.GitlabAuthenticationError:
+                  return {
+                  'statusCode': 200,
+                  'body': json.dumps('Invalid Credentials ')
+                  }
+
+
+  GitLabApiGatewayInvoke:
+    Type: "AWS::Lambda::Permission"
+    Properties:
+      Action: "lambda:InvokeFunction"
+      FunctionName: !GetAtt "GitLabLambdaStack.Arn"
+      Principal: "apigateway.amazonaws.com"
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${GitLabApi}/*/GET/"
+
+  
+  GitLabLambdaLogGroup:
+    DependsOn: GitLabLambdaStack
+    Type: "AWS::Logs::LogGroup"
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${GitLabLambdaStack}"
+
+
+
+  
+  CodeBuildProjectGitLab:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: CodeBuildProjectGitLab
+      ServiceRole: !GetAtt CodeBuildGitLabRole.Arn
+      Artifacts:
+        Type: no_artifacts
+      Environment:
+        Type: LINUX_CONTAINER
+
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:3.0
+      Source:
+        Location: https://git-codecommit.us-east-2.amazonaws.com/v1/repos/gitlabmigrate-source
+        Type: CODECOMMIT
+        
+
+      TimeoutInMinutes: 10
+  CodeBuildGitLabRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Action: ['sts:AssumeRole']
+          Effect: Allow
+          Principal:
+            Service: [codebuild.amazonaws.com]
+        Version: '2012-10-17'
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSCodeBuildAdminAccess
+        - arn:aws:iam::aws:policy/AWSCodeCommitFullAccess
+      Policies:
+        - PolicyName: CodeBuildGitLabAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Action:
+                - 'logs:*'
+                - 'ec2:CreateNetworkInterface'
+                - 'ec2:DescribeNetworkInterfaces'
+                - 'ec2:DeleteNetworkInterface'
+                - 'ec2:DescribeSubnets'
+                - 'ec2:DescribeSecurityGroups'
+                - 'ec2:DescribeDhcpOptions'
+                - 'ec2:DescribeVpcs'
+                - 'ec2:CreateNetworkInterfacePermission'
+                - 'codebuild:*'
+                - 'codecommit:GetBranch'
+                - 'codecommit:GetCommit'
+                - 'codecommit:GetRepository'
+                - 'codecommit:ListBranches'
+                - 'codecommit:ListRepositories'
+                - 'cloudwatch:GetMetricStatistics'
+                - 'events:DeleteRule'
+                - 'events:DescribeRule'
+                - 'events:DisableRule'
+                - 'events:EnableRule'
+                - 'events:ListTargetsByRule'
+                - 'events:ListRuleNamesByTarget'
+                - 'events:PutRule'
+                - 'events:PutTargets'
+                - 'events:RemoveTargets'
+                - 'logs:GetLogEvents'
+                - 's3:GetBucketLocation'
+                - 's3:ListAllMyBuckets'
+                - 's3:GetObject'
+                - 's3:GetObjectVersion'
+                Effect: Allow
+                Resource: '*'
+
+##################################################################################################################
+##################################################################################################################
+##################################################################################################################
+##################################################################################################################
+##################################################################################################################
+##################################################################################################################
+##################################################################################################################
+
+  BitBucketApi:
+      Type: "AWS::ApiGateway::RestApi"
+      Properties:
+        Name: BitBucket
+
+  BitBucketApiMethod:
+      Type: "AWS::ApiGateway::Method"
+      Properties:
+        AuthorizationType: "NONE"
+        HttpMethod: "GET"
+        Integration:
+          IntegrationHttpMethod: "POST"
+          Type: "AWS_PROXY"
+          Uri: !Sub
+            - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${lambdaArn}/invocations"
+            - lambdaArn: !GetAtt "BitBucketLambdaStack.Arn"
+        ResourceId: !GetAtt "BitBucketApi.RootResourceId"
+        RestApiId: !Ref "BitBucketApi"
+
+  BitBucketDeployment:
+      Type: "AWS::ApiGateway::Deployment"
+      DependsOn: "BitBucketApiMethod"
+      Properties:
+        RestApiId: !Ref "BitBucketApi"
+        StageName: bitbucketmigrate
+
+    #GitLab lambda function template
+  BitBucketLambdaFullRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Action: ['sts:AssumeRole']
+          Effect: Allow
+          Principal:
+            Service: [lambda.amazonaws.com]
+        Version: '2012-10-17'
+      Path: /
+      Policies:
+        - PolicyName: BitBucketFullAcessLMDA
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Action:
+                - 'logs:*'
+                - 'ec2:CreateNetworkInterface'
+                - 'ec2:DescribeNetworkInterfaces'
+                - 'ec2:DeleteNetworkInterface'
+                - 'ec2:DescribeSubnets'
+                - 'ec2:DescribeSecurityGroups'
+                - 'ec2:DescribeDhcpOptions'
+                - 'ec2:DescribeVpcs'
+                - 'ec2:CreateNetworkInterfacePermission'
+                - 'codebuild:*'
+                - 'codecommit:GetBranch'
+                - 'codecommit:GetCommit'
+                - 'codecommit:GetRepository'
+                - 'codecommit:ListBranches'
+                - 'codecommit:ListRepositories'
+                - 'cloudwatch:GetMetricStatistics'
+                - 'events:DeleteRule'
+                - 'events:DescribeRule'
+                - 'events:DisableRule'
+                - 'events:EnableRule'
+                - 'events:ListTargetsByRule'
+                - 'events:ListRuleNamesByTarget'
+                - 'events:PutRule'
+                - 'events:PutTargets'
+                - 'events:RemoveTargets'
+                - 'logs:GetLogEvents'
+                - 's3:GetBucketLocation'
+                - 's3:ListAllMyBuckets'
+                - 's3:GetObject'
+                - 's3:GetObjectVersion'
+                Effect: Allow
+                Resource: '*'
+  BitBucketLambdaStack:
+      Type: AWS::Lambda::Function
+      Properties:
+        FunctionName: BitBucketLambdaStack
+        Role: !GetAtt BitBucketLambdaFullRole.Arn
+        Runtime: python3.7
+        Handler: index.my_handler
+        Timeout: 10
+        Layers: 
+        - arn:aws:lambda:us-east-2:986496399122:layer:bitbuck:1
+        Code:
+          ZipFile: |
+            import json
+            from bitbucket.client import Client
+            import boto3
+
+            def lambda_handler(event, context):
+                repoURL = "https://git-codecommit.us-east-2.amazonaws.com/v1/repos/"
+
+                #email = 'githubinternaws@gmail.com'
+                #password = 'roger007'
+                #phone = '6176062741'
+                result = event["queryStringParameters"]
+                mail = result['email']
+                email = mail
+                pwd = result['password']
+                password = pwd 
+                phone = result['phone']
+                try:
+                    client = Client(email,password)
+                    flag = 1
+                except:
+                    return {
+                    'statusCode': 200,
+                    'body': json.dumps('Invalid Credentials')
+                }
+                
+                if len(phone)==10 or len(phone)==11 or len(phone)==12:
+                    if "+" in phone:
+                        phone_number = phone.replace('+','')
+                        if phone_number.isdigit() == False:
+                            return {
+                            'statusCode': 200,
+                            'body': json.dumps("Invalid Phone Number")
+                            } 
+                        else:
+                            phone_number = phone
+                    else:
+                        phone_number = phone
+                elif len(phone)==0 or len(phone)==1:
+                  phone_number = '6176062741'
+                else:
+                    return {
+                        'statusCode': 200,
+                        'body': json.dumps("Invalid Phone Number")
+                    }
+                
+                
+                
+                    
+                if (flag == 1):
+                    cb = boto3.client( 'codebuild' )
+                    response = cb.start_build(projectName='bitbuck',
+                    environmentVariablesOverride=[
+                    {'name':'Email','value':email,'type':'PLAINTEXT'},
+                    {'name':'Password','value': password,'type':'PLAINTEXT'},
+                    {'name':'Phone','value': phone_number,'type':'PLAINTEXT'}])
+                    return {
+                        'statusCode': 200,
+                        'body': json.dumps("Parameters Passed Code Build Starting, repo contents are stored in "+repoURL)
+                    } 
+
+
+  BitBucketGatewayInvoke:
+    Type: "AWS::Lambda::Permission"
+    Properties:
+      Action: "lambda:InvokeFunction"
+      FunctionName: !GetAtt "BitBucketLambdaStack.Arn"
+      Principal: "apigateway.amazonaws.com"
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${BitBucketApi}/*/GET/"
+
+  
+  BitBucketLambdaLogGroup:
+    DependsOn: GitLabLambdaStack
+    Type: "AWS::Logs::LogGroup"
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${BitBucketLambdaStack}"
+
+
+
+  
+  CodeBuildProjectBitBucket:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: CodeBuildProjectBitBucket
+      ServiceRole: !GetAtt CodeBuildBitBucketRole.Arn
+      Artifacts:
+        Type: no_artifacts
+      Environment:
+        Type: LINUX_CONTAINER
+
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:3.0
+      Source:
+        Location: https://git-codecommit.us-east-2.amazonaws.com/v1/repos/bitbuckrmr
+        Type: CODECOMMIT
+        
+
+      TimeoutInMinutes: 10
+  CodeBuildBitBucketRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Action: ['sts:AssumeRole']
+          Effect: Allow
+          Principal:
+            Service: [codebuild.amazonaws.com]
+        Version: '2012-10-17'
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSCodeBuildAdminAccess
+        - arn:aws:iam::aws:policy/AWSCodeCommitFullAccess
+      Policies:
+        - PolicyName: CodeBuildBitBucketAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Action:
+                - 'logs:*'
+                - 'ec2:CreateNetworkInterface'
+                - 'ec2:DescribeNetworkInterfaces'
+                - 'ec2:DeleteNetworkInterface'
+                - 'ec2:DescribeSubnets'
+                - 'ec2:DescribeSecurityGroups'
+                - 'ec2:DescribeDhcpOptions'
+                - 'ec2:DescribeVpcs'
+                - 'ec2:CreateNetworkInterfacePermission'
+                - 'codebuild:*'
+                - 'codecommit:GetBranch'
+                - 'codecommit:GetCommit'
+                - 'codecommit:GetRepository'
+                - 'codecommit:ListBranches'
+                - 'codecommit:ListRepositories'
+                - 'cloudwatch:GetMetricStatistics'
+                - 'events:DeleteRule'
+                - 'events:DescribeRule'
+                - 'events:DisableRule'
+                - 'events:EnableRule'
+                - 'events:ListTargetsByRule'
+                - 'events:ListRuleNamesByTarget'
+                - 'events:PutRule'
+                - 'events:PutTargets'
+                - 'events:RemoveTargets'
+                - 'logs:GetLogEvents'
+                - 's3:GetBucketLocation'
+                - 's3:ListAllMyBuckets'
+                - 's3:GetObject'
+                - 's3:GetObjectVersion'
+                Effect: Allow
+                Resource: '*'
+
+
+
+
+
+##################################################################################################################
+##################################################################################################################
+##################################################################################################################
+##################################################################################################################
+##################################################################################################################
+##################################################################################################################
+##################################################################################################################
+Outputs:
+  GitLabInvokeURL:
+    Value: !Sub https://${GitLabApi}.execute-api.${AWS::Region}.amazonaws.com/gitlabmigrate?token=&phone=
+  GitHubInvokeURL:
+    Value: !Sub https://${GitHubApi}.execute-api.${AWS::Region}.amazonaws.com/githubmigrate?token=&user=&repo=&phone=
+  SyncInvokeURL:
+    Value: !Sub https://${SyncApi}.execute-api.${AWS::Region}.amazonaws.com/githubsync?token=&user=&phone=
+  BitBucketInvokeURL:
+    Value: !Sub https://${BitBucketApi}.execute-api.${AWS::Region}.amazonaws.com/bitbucketmigrate?email=&password=&phone=
