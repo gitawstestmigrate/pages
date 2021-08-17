@@ -39,18 +39,24 @@ body {
 <div class="topnav">
   <a class="active" href="#home">GitHub to CodeCommit</a>
   <a href="gitlab.html">GitLab to CodeCommit</a>
+<a   class = ""  href="bitbucket.html">BitBucket to CodeCommit </a>
 </div>
 
 <br>
 
 <label>
     Enter token: 
-    <input id="token" />
+    <input id="token">
 </label>
 <br />
 <label>
     Enter username: 
-    <input id="username" />
+    <input id="username">
+</label>
+<br/>
+<label>
+Enter phone number:
+<input id="phone">
 </label>
 <br />
 <br/>
@@ -80,9 +86,9 @@ var button = document.getElementById('test');
 var token = document.getElementById('token');
 var username = document.getElementById('username');
 var proj = document.getElementById('project');
-
+var pnum = document.getElementById('phone');
 function migrateALL(){
-    var res = "https://nvyonspg4l.execute-api.us-east-2.amazonaws.com/multimigrate?token="+token.value+"&user="+username.value
+    var res = "https://nvyonspg4l.execute-api.us-east-2.amazonaws.com/multimigrate?token="+token.value+"&user="+username.value+"&phone="+phone.value
    
     window.open(res,"_blank")
 }
@@ -104,7 +110,7 @@ button.onclick = function () {
 
     for (var i = 0; i<myArray.length; i++)
     {
-        var str = "https://a7soew4kyg.execute-api.us-east-2.amazonaws.com/paramv1/startcodebuild?token="+token.value+"&user="+username.value+"&repo="+myArray[i];
+        var str = "https://a7soew4kyg.execute-api.us-east-2.amazonaws.com/paramv1/startcodebuild?token="+token.value+"&user="+username.value+"&repo="+myArray[i]+"&phone="+phone.value;
         window.open(str,"_blank");
 
     }
