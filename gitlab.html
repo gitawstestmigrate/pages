@@ -63,9 +63,11 @@ var button = document.getElementById('test');
 var token = document.getElementById('token');
 var phone = document.getElementById('phone');
 function migrateALL(){
-    var res = "https://r44arcznjh.execute-api.us-east-2.amazonaws.com/gitlabmigrate?token="+token.value+"&phone="+phone.value;
+    var res = "INSERT V3"
+    
+    var v3 = res+token.value+"&phone="+phone.value;
 
-    window.open(res,"_blank")
+    window.open(v3,"_blank")
 }
 
 
